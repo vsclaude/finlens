@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Tests are Node programs, and they import from both halves — a handler
+    // from the main process, a pure function from the renderer — so this is
+    // the one project that sees both.
+    "types": ["node"],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "test",
+    // The renderer's ambient declarations. A test that reaches a module which
+    // touches `window.desktop` needs them.
+    "src/renderer/global.d.ts"
+  ],
+  // Gitignored scratch: it may import something half-written, and it is not
+  // what a failing typecheck should be about.
+  "exclude": ["test/*.local.*"]
+}

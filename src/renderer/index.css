@@ -1,0 +1,41 @@
+@import "./styles/globals.css";
+
+/*
+ * globals.css expects the app shell to define these; the system font stack,
+ * since a desktop app has no font-loading step worth adding.
+ */
+:root {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas,
+    monospace;
+}
+
+/*
+ * On macOS the window has no title bar of its own — the app's header stands in
+ * for it (see `titleBarStyle` in `main/main.ts`). That makes the header the
+ * only thing left to drag the window by, and a drag region swallows clicks
+ * unless whatever is clickable inside it opts back out.
+ *
+ * The opt-out below is a backstop, not something to rely on: macOS drops the
+ * `no-drag` rect often enough that a button inside a drag region is one that
+ * works every other press. Keep buttons outside the region altogether — the
+ * draggable part is the space between them — rather than punching holes in it.
+ */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.drag-region button,
+.drag-region a,
+.drag-region input,
+.drag-region [role="button"],
+.drag-region [role="combobox"] {
+  -webkit-app-region: no-drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}

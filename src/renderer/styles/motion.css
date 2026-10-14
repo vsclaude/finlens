@@ -1,0 +1,158 @@
+/*
+ * The app's own motion. Everything here is a `--animate-*` token, read as a
+ * Tailwind `animate-*` utility, plus the one drawing that needs plain CSS
+ * (`.spinner`). An animation added anywhere else should come here instead, so
+ * there is one list to read and one `prefers-reduced-motion` block to keep.
+ */
+@theme {
+  --animate-fade: fade 160ms ease-out both;
+  --animate-pop: pop 240ms cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+
+  /* The analyst's turn indicator. The dots are staggered by the caller; the
+     shimmer holds still for the last third of its cycle so the light reads as
+     passing over the word rather than circling it. */
+  --animate-dot: dot 1.2s ease-in-out infinite;
+  --animate-shimmer: shimmer 2.4s ease-in-out infinite;
+
+  /* `.spinner`, below. Two loops on one clock: the grid breathes apart while
+     its eight outer cells step one place round the middle. */
+  --animate-shuffle: shuffle-spread 1s infinite, shuffle-step 1s infinite;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+
+@keyframes dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0) scale(0.8);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-0.1875rem) scale(1);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  66%,
+  to {
+    background-position: 0% 0;
+  }
+}
+
+.text-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 40%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 60%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: var(--animate-shimmer);
+}
+
+/*
+ * The original grows its box from 45px to 65px around 16px cells. A row cannot
+ * have its spinner change width under the text beside it, so the box holds
+ * still and the cells shrink instead — 16/45 to 16/65 of it — which is the same
+ * picture: percent positions keep the corners in the corners at either size.
+ */
+@keyframes shuffle-spread {
+  0%,
+  100% {
+    background-size: 36% 36%;
+  }
+  35%,
+  65% {
+    background-size: 25% 25%;
+  }
+}
+
+@keyframes shuffle-step {
+  0%,
+  40% {
+    background-position:
+      0 0,
+      0 50%,
+      0 100%,
+      50% 100%,
+      100% 100%,
+      100% 50%,
+      100% 0,
+      50% 0,
+      50% 50%;
+  }
+  60%,
+  100% {
+    background-position:
+      0 50%,
+      0 100%,
+      50% 100%,
+      100% 100%,
+      100% 50%,
+      100% 0,
+      50% 0,
+      0 0,
+      50% 50%;
+  }
+}
+
+/*
+ * The spinner (`ui/spinner.tsx`): a 3×3 grid whose outer cells step
+ * round the middle one, after css-loaders.com's `l32`. Not lucide's `Loader2`,
+ * whose eight ticks smear into a grey blot at 12px; nine squares stay squares.
+ *
+ * Painted in the brand colour, not the text's: a loader is the one mark on a
+ * row that is the app speaking rather than the content, and `color` set here
+ * (unlayered) outranks the `text-muted-foreground` its callers carried over
+ * from the icon. On a filled primary button that would be the button's own
+ * colour, so there it takes the button's text instead.
+ *
+ * It animates `background-*`, which repaints rather than composites — cheap
+ * because what repaints is a 12px box. `scale` is the icon's own inset: lucide draws in three
+ * quarters of the box, and a spinner swapped in at the same class should not
+ * grow. It is the `scale` property, not a transform, so it composes with a
+ * caller's `translate-*` instead of being replaced by it.
+ */
+.spinner {
+  --cell: no-repeat linear-gradient(currentColor 0 0);
+  color: var(--primary);
+  display: inline-block;
+  aspect-ratio: 1;
+  scale: 0.85;
+  background:
+    var(--cell), var(--cell), var(--cell), var(--cell), var(--cell),
+    var(--cell), var(--cell), var(--cell), var(--cell);
+  background-size: 36% 36%;
+  animation: var(--animate-shuffle);
+}
+
+.bg-primary .spinner {
+  color: var(--primary-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --animate-fade: none;
+    --animate-pop: none;
+    --animate-dot: none;
+    --animate-shimmer: none;
+  }
+}

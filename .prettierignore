@@ -1,0 +1,12 @@
+node_modules/
+coverage/
+.bun-cache/
+.bun-tmp/
+
+# Build output: the main process' bundle, the renderer's, the installers.
+dist-electron/
+dist-renderer/
+release/
+
+# Lockfiles and generated manifests.
+bun.lock
