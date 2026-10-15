@@ -38,9 +38,3 @@ export function useAiModels(): AgentModel[] {
 
   return models
 }
-
-/** Forgets the answer — the account may have changed with the API key. */
-export function forgetAiModels() {
-  asked = null
-  held = null
-}

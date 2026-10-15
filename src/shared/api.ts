@@ -28,9 +28,6 @@ export type BaseCurrency = "USD" | "VND"
  * Everything kept in `settings.json`, with its default in `DEFAULT_SETTINGS`.
  * A key added here is read back as its default by an existing install, so a
  * new setting never needs a migration.
- *
- * The API key is not here: it is kept encrypted in its own file, and this
- * document is one the renderer reads whole.
  */
 export type Settings = {
   palette: Palette
@@ -54,8 +51,6 @@ export const DEFAULT_SETTINGS: Settings = {
 export type AppInfo = {
   name: string
   version: string
-  /** Where this app keeps its files — shown so somebody can find them. */
-  dataDir: string
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +177,11 @@ export type AiMessage = {
   tools: AiToolUse[]
   /** ISO. */
   createdAt: string
+  /** ISO, set on an answer when its turn ends — with `createdAt`, how long
+   * it took. */
+  finishedAt?: string
+  /** What this answer's turn cost, in USD. */
+  costUsd?: number
   error?: string
 }
 
@@ -197,13 +197,6 @@ export type AiThread = {
   /** ISO. */
   createdAt: string
   updatedAt: string
-}
-
-export type AiAuth = {
-  /** A key saved in this app's settings. */
-  savedKey: boolean
-  /** `ANTHROPIC_API_KEY` in the environment the app was started from. */
-  envKey: boolean
 }
 
 /** What the application menu asks the renderer to do — see `main/menu.ts`. */
@@ -228,11 +221,6 @@ export type DesktopApi = {
     value: Settings[K]
   ) => Promise<void>
 
-  /** A native folder picker; null when cancelled. */
-  pickDirectory: () => Promise<string | null>
-  /** Shows a path in the OS file manager. */
-  revealPath: (target: string) => Promise<void>
-
   /** Instruments that failed to load are left out rather than failing all. */
   getQuotes: (keys: InstrumentKey[]) => Promise<Quote[]>
   getCandles: (key: InstrumentKey, interval: Interval) => Promise<Candle[]>
@@ -251,11 +239,13 @@ export type DesktopApi = {
   listTransactions: () => Promise<Transaction[]>
   /** Refuses a sell of more than is held on that date. */
   addTransaction: (transaction: NewTransaction) => Promise<Transaction>
+  /** Validated like an add, against the ledger with the change in it. */
+  updateTransaction: (
+    id: string,
+    transaction: NewTransaction
+  ) => Promise<Transaction>
   removeTransaction: (id: string) => Promise<void>
 
-  getAiAuth: () => Promise<AiAuth>
-  /** Null forgets the saved key. */
-  setAiApiKey: (key: string | null) => Promise<void>
   /**
    * The models the analyst's Claude Code offers this account, asked of the
    * CLI itself (no tokens spent). Empty when it could not be asked — the
@@ -267,6 +257,7 @@ export type DesktopApi = {
    * thread's id; the reply arrives through `onThreadChanged`. */
   askAi: (threadId: string | null, prompt: string) => Promise<string>
   cancelAi: (threadId: string) => Promise<void>
+  renameThread: (threadId: string, title: string) => Promise<void>
   removeThread: (threadId: string) => Promise<void>
 
   /** Each returns its own unsubscribe. */
@@ -284,8 +275,6 @@ export const IPC = {
   appInfo: "app:info",
   getSetting: "settings:get",
   setSetting: "settings:set",
-  pickDirectory: "dialog:pick-directory",
-  revealPath: "shell:reveal",
   getQuotes: "market:quotes",
   getCandles: "market:candles",
   getCoinMarkets: "market:coins",
@@ -296,13 +285,13 @@ export const IPC = {
   removeWatch: "watchlist:remove",
   listTransactions: "portfolio:list",
   addTransaction: "portfolio:add",
+  updateTransaction: "portfolio:update",
   removeTransaction: "portfolio:remove",
-  getAiAuth: "ai:auth",
-  setAiApiKey: "ai:set-key",
   listAiModels: "ai:models",
   listThreads: "ai:threads",
   askAi: "ai:ask",
   cancelAi: "ai:cancel",
+  renameThread: "ai:rename",
   removeThread: "ai:remove",
 } as const
 

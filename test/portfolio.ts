@@ -10,8 +10,10 @@ import type { NewTransaction, Transaction } from "../src/shared/api"
 import { Portfolio } from "../src/main/portfolio"
 import {
   computeHoldings,
+  positionSize,
   toBase,
   valuePortfolio,
+  VN_LOT,
 } from "../src/shared/portfolio"
 import { check, finish, section } from "./harness"
 
@@ -32,6 +34,53 @@ const trade = (patch: Partial<Transaction>): Transaction => ({
   note: "",
   ...patch,
 })
+
+section("positionSize")
+const long = positionSize({ capital: 10_000, riskPct: 1, entry: 50, stop: 45 })!
+check("risk budget over the stop distance", long.quantity === 20, long)
+check(
+  "risks what was asked",
+  near(long.riskAmount, 100) && near(long.riskPct, 1)
+)
+check("a stop below is long", long.side === "long")
+check(
+  "targets are 1R, 2R, 3R above",
+  long.targets.join() === "55,60,65",
+  long.targets
+)
+const vn = positionSize({
+  capital: 100_000_000,
+  riskPct: 2,
+  entry: 25_000,
+  stop: 23_500,
+  lot: VN_LOT,
+})!
+check(
+  "rounded down to whole lots",
+  vn.quantity === 1300 && vn.riskAmount <= 2_000_000,
+  vn
+)
+const tight = positionSize({
+  capital: 1000,
+  riskPct: 5,
+  entry: 100,
+  stop: 99.9,
+})!
+check(
+  "never more than the capital buys",
+  tight.quantity === 10 && tight.cappedByCapital,
+  tight
+)
+const short = positionSize({ capital: 1000, riskPct: 1, entry: 10, stop: 11 })!
+check(
+  "a stop above is short",
+  short.side === "short" && short.targets[0] === 9,
+  short
+)
+check(
+  "a stop at the entry is no answer",
+  positionSize({ capital: 1000, riskPct: 1, entry: 10, stop: 10 }) === null
+)
 
 section("computeHoldings — average cost")
 const [btc] = computeHoldings([
@@ -185,6 +234,40 @@ try {
   }
   check("removing a buy a later sell needs is refused", stranded)
   check("persists to disk", (await new Portfolio(dir).list()).length === 2)
+
+  const { transaction: fixed, all } = await portfolio.update(transaction.id, {
+    ...input,
+    price: 26_500,
+    note: " sửa giá ",
+  })
+  check(
+    "an update keeps the id and cleans like an add",
+    fixed.id === transaction.id && fixed.note === "sửa giá",
+    fixed
+  )
+  check(
+    "and replaces the trade in place",
+    all.length === 2 && all[0]?.price === 26_500,
+    all
+  )
+  let shrunk = false
+  try {
+    await portfolio.update(transaction.id, { ...input, quantity: 100 })
+  } catch {
+    shrunk = true
+  }
+  check("an update that strands a sell is refused", shrunk)
+  check(
+    "and leaves the trade as it was",
+    (await new Portfolio(dir).list())[0]?.quantity === 1000
+  )
+  let missing = false
+  try {
+    await portfolio.update("nope", input)
+  } catch {
+    missing = true
+  }
+  check("an unknown id is refused", missing)
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }

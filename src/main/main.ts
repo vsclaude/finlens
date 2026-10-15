@@ -100,7 +100,7 @@ function keepInside(window: BrowserWindow): void {
 // module scope rather than inside `whenReady`.
 registerAppScheme()
 
-const ipc = registerIpc(() => mainWindow)
+const ipc = registerIpc()
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({

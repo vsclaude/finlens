@@ -32,9 +32,6 @@ const api: DesktopApi = {
   getSetting: (key) => ipcRenderer.invoke(IPC.getSetting, key),
   setSetting: (key, value) => ipcRenderer.invoke(IPC.setSetting, key, value),
 
-  pickDirectory: () => ipcRenderer.invoke(IPC.pickDirectory),
-  revealPath: (target) => ipcRenderer.invoke(IPC.revealPath, target),
-
   getQuotes: (keys) => ipcRenderer.invoke(IPC.getQuotes, keys),
   getCandles: (key, interval) =>
     ipcRenderer.invoke(IPC.getCandles, key, interval),
@@ -50,14 +47,16 @@ const api: DesktopApi = {
   listTransactions: () => ipcRenderer.invoke(IPC.listTransactions),
   addTransaction: (transaction) =>
     ipcRenderer.invoke(IPC.addTransaction, transaction),
+  updateTransaction: (id, transaction) =>
+    ipcRenderer.invoke(IPC.updateTransaction, id, transaction),
   removeTransaction: (id) => ipcRenderer.invoke(IPC.removeTransaction, id),
 
-  getAiAuth: () => ipcRenderer.invoke(IPC.getAiAuth),
-  setAiApiKey: (key) => ipcRenderer.invoke(IPC.setAiApiKey, key),
   listAiModels: () => ipcRenderer.invoke(IPC.listAiModels),
   listThreads: () => ipcRenderer.invoke(IPC.listThreads),
   askAi: (threadId, prompt) => ipcRenderer.invoke(IPC.askAi, threadId, prompt),
   cancelAi: (threadId) => ipcRenderer.invoke(IPC.cancelAi, threadId),
+  renameThread: (threadId, title) =>
+    ipcRenderer.invoke(IPC.renameThread, threadId, title),
   removeThread: (threadId) => ipcRenderer.invoke(IPC.removeThread, threadId),
 
   onMenuCommand: (listener) =>

@@ -1,12 +1,20 @@
 import { z } from "zod"
 
-import type { InstrumentKey, Interval } from "../../shared/api"
-import { performanceStats, technicalSummary } from "../../shared/indicators"
-import { parseKey, USD_VND_KEY } from "../../shared/market"
+import type { Candle, InstrumentKey, Interval, Market } from "../../shared/api"
+import {
+  performanceStats,
+  returnCorrelations,
+  technicalSummary,
+  WEEK,
+  WEEK_OFFSET,
+} from "../../shared/indicators"
+import { parseKey, USD_VND_KEY, VN_INDICES } from "../../shared/market"
 import {
   computeHoldings,
+  positionSize,
   sortLedger,
   valuePortfolio,
+  VN_LOT,
 } from "../../shared/portfolio"
 import type { MarketData } from "../market/market-data"
 import type { Portfolio } from "../portfolio"
@@ -54,6 +62,58 @@ function checkKey(key: string): string | null {
 
 const isoDate = (seconds: number) =>
   new Date(seconds * 1000).toISOString().slice(0, 16)
+
+const INTERVAL_SECONDS: Record<Interval, number> = {
+  "1h": 3600,
+  "4h": 4 * 3600,
+  "1d": 86_400,
+  "1w": WEEK,
+}
+
+/**
+ * Where a market's trading day starts relative to UTC, so a daily bar falls
+ * in its own session's bucket whatever hour its provider stamped it with —
+ * see `returnCorrelations`. New York is taken at EDT; an hour off in winter
+ * still lands every session stamp inside the right day.
+ */
+const DAY_OFFSET: Record<Market, number> = {
+  crypto: 0,
+  vn: 7 * 3600,
+  us: -4 * 3600,
+}
+
+/** One instrument's technical state in a line, for tools that list many. */
+function technicalRow(candles: Candle[]) {
+  const summary = technicalSummary(candles)
+  if (!summary) return null
+  const { last, sma20, sma50, sma200 } = summary
+  const trend =
+    sma50 == null
+      ? "unknown"
+      : last >= sma50 && (sma200 == null || sma50 >= sma200)
+        ? "up"
+        : last < sma50 && (sma200 == null || sma50 < sma200)
+          ? "down"
+          : "mixed"
+  return {
+    last: round(last, 6),
+    changePct: {
+      bars1: round(summary.change.bars1, 3),
+      bars7: round(summary.change.bars7, 3),
+      bars30: round(summary.change.bars30, 3),
+    },
+    trend,
+    aboveSma20: sma20 == null ? null : last >= sma20,
+    rsi14: round(summary.rsi14, 3),
+    macdHistogram: round(summary.macd?.histogram, 4),
+    atrPct: round(summary.atrPct, 3),
+    support: round(summary.support, 6),
+    resistance: round(summary.resistance, 6),
+    volumeRatio: round(summary.volumeRatio, 3),
+    score: round(summary.score, 3),
+    verdict: summary.verdict,
+  }
+}
 
 /**
  * The analyst's window on the app: market data, the watchlist and the
@@ -320,18 +380,181 @@ export function analystTools(sdk: Sdk, ctx: ToolContext) {
     }
   )
 
+  const multiTimeframe = tool(
+    "get_multi_timeframe",
+    "One instrument's technical state on every timeframe at once (1h, 4h, 1d, 1w): trend, RSI, MACD histogram, ATR%, support/resistance and score per timeframe. Use it to check whether the timeframes agree before a trade idea.",
+    { key: z.string().describe(KEY_HELP) },
+    async ({ key }) => {
+      const bad = checkKey(key)
+      if (bad) return failure(bad)
+      const rows = await Promise.all(
+        INTERVALS.map(async (interval) => {
+          try {
+            const row = technicalRow(await ctx.market.candles(key, interval))
+            return row ? { interval, ...row } : { interval, error: "no data" }
+          } catch (error) {
+            return { interval, error: String(error) }
+          }
+        })
+      )
+      return json({ key, timeframes: rows })
+    }
+  )
+
+  const scanTechnicals = tool(
+    "scan_technicals",
+    "Screen many instruments at one timeframe, one compact row each (trend, RSI, MACD histogram, ATR%, volume ratio, score, verdict), sorted by score. Leave keys out to scan the user's watchlist and open positions.",
+    {
+      keys: z.array(z.string()).max(25).optional().describe(KEY_HELP),
+      interval: z.enum(INTERVALS).default("1d"),
+    },
+    async ({ keys, interval }) => {
+      let list = keys ?? []
+      if (list.length === 0) {
+        const [watched, ledger] = await Promise.all([
+          ctx.watchlist.list(),
+          ctx.portfolio.list(),
+        ])
+        const held = computeHoldings(ledger)
+          .filter((each) => each.quantity > 0)
+          .map((each) => each.key)
+        list = [...new Set([...held, ...watched.map((each) => each.key)])]
+        if (list.length === 0) {
+          return json({
+            empty: true,
+            note: "Watchlist and portfolio are empty.",
+          })
+        }
+        list = list.slice(0, 25)
+      }
+      const bad = list.map(checkKey).find(Boolean)
+      if (bad) return failure(bad)
+      const rows = await Promise.all(
+        list.map(async (key) => {
+          try {
+            const row = technicalRow(await ctx.market.candles(key, interval))
+            return row ? { key, ...row } : { key, error: "no data" }
+          } catch (error) {
+            return { key, error: String(error) }
+          }
+        })
+      )
+      rows.sort(
+        (a, b) =>
+          ("score" in b ? (b.score ?? 0) : -2) -
+          ("score" in a ? (a.score ?? 0) : -2)
+      )
+      return json({ interval, rows })
+    }
+  )
+
+  const getCorrelation = tool(
+    "get_correlation",
+    "Correlation matrix (−1…1) of bar-to-bar returns between 2–10 instruments over the last N bars they share. Use it for diversification: two holdings above ~0.8 move as one bet.",
+    {
+      keys: z.array(z.string()).min(2).max(10).describe(KEY_HELP),
+      interval: z.enum(INTERVALS).default("1d"),
+      bars: z.number().int().min(20).max(500).default(90),
+    },
+    async ({ keys, interval, bars }) => {
+      const bad = keys.map(checkKey).find(Boolean)
+      if (bad) return failure(bad)
+      const loaded = await Promise.allSettled(
+        keys.map((key) => ctx.market.candles(key, interval))
+      )
+      const failed = keys.filter((_, i) => loaded[i]!.status === "rejected")
+      if (failed.length) return failure(`No candles for ${failed.join(", ")}`)
+      const intraday = interval === "1h" || interval === "4h"
+      const series = keys.map((key, i) => {
+        const candles = (loaded[i] as PromiseFulfilledResult<Candle[]>).value
+        // Intraday bars are stamped on the hour by every provider, so they
+        // pair as they are; a day or a week is the market's own.
+        const market = parseKey(key)!.market
+        const offset = intraday
+          ? 0
+          : DAY_OFFSET[market] - (interval === "1w" ? WEEK_OFFSET : 0)
+        return { candles, offset }
+      })
+      const { bars: shared, matrix } = returnCorrelations(
+        series,
+        INTERVAL_SECONDS[interval],
+        bars
+      )
+      const pairs = keys.flatMap((a, i) =>
+        keys.slice(i + 1).map((b, j) => ({
+          a,
+          b,
+          correlation: round(matrix[i]![i + 1 + j], 3),
+        }))
+      )
+      return json({
+        interval,
+        sharedBars: shared,
+        ...(shared < 20
+          ? { warning: "Few shared bars; treat these numbers as rough." }
+          : {}),
+        keys,
+        matrix: matrix.map((row) => row.map((value) => round(value, 3))),
+        pairs: pairs.sort(
+          (x, y) => (y.correlation ?? -2) - (x.correlation ?? -2)
+        ),
+      })
+    }
+  )
+
+  const sizePosition = tool(
+    "position_size",
+    "Position size for a trade idea by fixed-fractional risk: how many units lose riskPct of capital if the stop is hit, rounded to lots (100 shares for Vietnamese stocks) and capped by the capital, with targets at 1R, 2R and 3R. Capital, entry and stop must be in the same currency. Always use this rather than computing a size yourself.",
+    {
+      capital: z.number().positive(),
+      riskPct: z.number().min(0.1).max(10).default(1),
+      entry: z.number().positive(),
+      stop: z.number().positive(),
+      key: z.string().optional().describe(`${KEY_HELP}. Sets the lot size.`),
+    },
+    async ({ capital, riskPct, entry, stop, key }) => {
+      const parsed = key ? parseKey(key) : null
+      const lot =
+        parsed?.market === "vn" && !VN_INDICES.has(parsed.symbol) ? VN_LOT : 1
+      const size = positionSize({ capital, riskPct, entry, stop, lot })
+      if (!size) return failure("Entry and stop must be positive and differ.")
+      return json({
+        ...(key ? { key } : {}),
+        lot,
+        side: size.side,
+        quantity: size.quantity,
+        riskAmount: round(size.riskAmount, 8),
+        riskPct: round(size.riskPct, 3),
+        positionValue: round(size.positionValue, 8),
+        positionPct: round(size.positionPct, 3),
+        targets: size.targets.map((each) => round(each, 6)),
+        ...(size.quantity === 0
+          ? { note: "The risk budget does not cover one lot at this stop." }
+          : size.cappedByCapital
+            ? {
+                note: "Capped by capital: the stop is tight enough that the risk budget would need leverage.",
+              }
+            : {}),
+      })
+    }
+  )
+
   return createSdkMcpServer({
     name: SERVER,
     version: "1.0.0",
-    // Six small tools: cheaper to always list than to make the model search.
+    // Ten small tools: cheaper to always list than to make the model search.
     alwaysLoad: true,
     tools: [
       getQuotes,
       getTechnicals,
+      multiTimeframe,
+      scanTechnicals,
       comparePerformance,
+      getCorrelation,
       cryptoOverview,
       getWatchlist,
       getPortfolio,
+      sizePosition,
     ],
   })
 }

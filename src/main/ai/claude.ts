@@ -1,7 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 
-import type { ApiKeyStore } from "../api-key-store"
 import type { SettingsStore } from "../settings"
 import type { AgentEvent, AgentRunner } from "./analyst"
 import { systemPrompt } from "./prompt"
@@ -38,7 +37,7 @@ export function describeInput(input: unknown): string {
 export function explainError(raw: string): string {
   const text = raw.trim() || "Lỗi không xác định"
   if (/auth|api[ _-]?key|log ?in|401|credential|unauthori[sz]ed/i.test(text)) {
-    return `${text}\n\nChưa xác thực được với Claude. Nhập Anthropic API key trong Cài đặt, hoặc đăng nhập Claude Code trên máy này (\`claude\` → /login).`
+    return `${text}\n\nChưa xác thực được với Claude. Đăng nhập Claude Code trên máy này (\`claude\` → /login), hoặc đặt biến môi trường ANTHROPIC_API_KEY rồi mở lại ứng dụng.`
   }
   if (/ENOENT|spawn/i.test(text)) {
     return `${text}\n\nKhông khởi động được Claude Code. Thử cài lại ứng dụng.`
@@ -47,12 +46,11 @@ export function explainError(raw: string): string {
 }
 
 /** The environment every Claude Code process this app starts runs in. */
-export function sdkEnv(apiKey: string | null, version: string) {
+export function sdkEnv(version: string) {
   return {
-    ...process.env,
-    // A saved key wins over the environment's; with neither, Claude Code
+    // `ANTHROPIC_API_KEY` from here when it is set; without it, Claude Code
     // falls back to the user's own `claude` login.
-    ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
+    ...process.env,
     CLAUDE_AGENT_SDK_CLIENT_APP: `finlens/${version}`,
   }
 }
@@ -74,7 +72,6 @@ export function createClaudeRunner(deps: {
   dataDir: string
   context: ToolContext
   settings: SettingsStore
-  apiKeys: ApiKeyStore
   executable: string | undefined
   version: string
 }): AgentRunner {
@@ -83,12 +80,11 @@ export function createClaudeRunner(deps: {
     const cwd = path.join(deps.dataDir, "ai")
     await mkdir(cwd, { recursive: true })
 
-    const [model, effort, language, baseCurrency, apiKey] = await Promise.all([
+    const [model, effort, language, baseCurrency] = await Promise.all([
       deps.settings.get("aiModel"),
       deps.settings.get("aiEffort"),
       deps.settings.get("aiLanguage"),
       deps.settings.get("baseCurrency"),
-      deps.apiKeys.get(),
     ])
 
     const abortController = new AbortController()
@@ -127,7 +123,7 @@ export function createClaudeRunner(deps: {
         ...(deps.executable
           ? { pathToClaudeCodeExecutable: deps.executable }
           : {}),
-        env: sdkEnv(apiKey, deps.version),
+        env: sdkEnv(deps.version),
         stderr: (data) => {
           stderr.push(data)
           if (stderr.length > 40) stderr.shift()

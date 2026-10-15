@@ -50,13 +50,7 @@ const EFFORT_LABELS: Record<AiEffort, string> = {
  * Main reads both settings at the start of each turn, so a pick applies to the
  * next question, mid-thread too.
  */
-export function ModelMenu({
-  side = "top",
-  className,
-}: {
-  side?: "top" | "bottom"
-  className?: string
-}) {
+export function ModelMenu({ className }: { className?: string }) {
   const models = useAiModels()
   const model = useSettings((state) => state.aiModel)
   const effort = useSettings((state) => state.aiEffort)
@@ -91,7 +85,7 @@ export function ModelMenu({
         }
       />
       <DropdownMenuContent
-        side={side}
+        side="top"
         align="start"
         className="w-72"
         onKeyDown={(event) => {

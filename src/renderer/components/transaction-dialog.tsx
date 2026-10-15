@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react"
 
-import type { Market, Side } from "@shared/api"
+import type { Market, Side, Transaction } from "@shared/api"
 import { MARKET_LABEL, MARKETS } from "@shared/market"
 import { Segmented } from "@/components/segmented"
 import { Button } from "@/components/ui/button"
@@ -25,25 +25,32 @@ const PRICE_HINT: Record<Market, string> = {
 const today = () => new Date().toISOString().slice(0, 10)
 
 /**
- * Records a trade. The symbol is checked against its provider so the ledger
- * only ever holds keys the app can price; an oversell is refused by main,
- * whose message is shown as is.
+ * Records a trade, or corrects one when `editing` is given. The symbol is
+ * checked against its provider so the ledger only ever holds keys the app
+ * can price; an oversell is refused by main, whose message is shown as is.
+ *
+ * The fields start from `editing` once, at mount — the caller remounts the
+ * dialog for each opening.
  */
 export function TransactionDialog({
   open,
   onOpenChange,
+  editing = null,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  editing?: Transaction | null
 }) {
-  const [market, setMarket] = useState<Market>("vn")
-  const [side, setSide] = useState<Side>("buy")
-  const [symbol, setSymbol] = useState("")
-  const [quantity, setQuantity] = useState("")
-  const [price, setPrice] = useState("")
-  const [fee, setFee] = useState("")
-  const [date, setDate] = useState(today)
-  const [note, setNote] = useState("")
+  const [market, setMarket] = useState<Market>(editing?.market ?? "vn")
+  const [side, setSide] = useState<Side>(editing?.side ?? "buy")
+  const [symbol, setSymbol] = useState(editing?.symbol ?? "")
+  const [quantity, setQuantity] = useState(
+    editing ? String(editing.quantity) : ""
+  )
+  const [price, setPrice] = useState(editing ? String(editing.price) : "")
+  const [fee, setFee] = useState(editing?.fee ? String(editing.fee) : "")
+  const [date, setDate] = useState(() => editing?.date.slice(0, 10) ?? today())
+  const [note, setNote] = useState(editing?.note ?? "")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -71,7 +78,7 @@ export function TransactionDialog({
         )
         return
       }
-      await window.desktop.addTransaction({
+      const trade = {
         market,
         symbol: instrument.symbol,
         side,
@@ -80,7 +87,13 @@ export function TransactionDialog({
         fee: Number(fee || 0),
         date,
         note,
-      })
+      }
+      if (editing) {
+        await window.desktop.updateTransaction(editing.id, trade)
+        onOpenChange(false)
+        return
+      }
+      await window.desktop.addTransaction(trade)
       setSymbol("")
       setQuantity("")
       setPrice("")
@@ -98,7 +111,9 @@ export function TransactionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Thêm giao dịch</DialogTitle>
+          <DialogTitle>
+            {editing ? "Sửa giao dịch" : "Thêm giao dịch"}
+          </DialogTitle>
           <DialogDescription>
             Giá và phí tính bằng đơn vị tiền của mã: VND cho cổ phiếu Việt Nam,
             USD cho phần còn lại.
@@ -198,7 +213,7 @@ export function TransactionDialog({
           {error && <p className="text-xs text-destructive">{error}</p>}
           <Button type="submit" disabled={busy}>
             {busy && <Spinner />}
-            Lưu giao dịch
+            {editing ? "Lưu thay đổi" : "Lưu giao dịch"}
           </Button>
         </form>
       </DialogContent>

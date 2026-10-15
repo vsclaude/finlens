@@ -2,7 +2,6 @@ import { mkdir } from "node:fs/promises"
 import path from "node:path"
 
 import { readModel, type AgentModel } from "../../shared/ai-models"
-import type { ApiKeyStore } from "../api-key-store"
 import { sdkEnv } from "./claude"
 
 /**
@@ -24,11 +23,9 @@ const TIMEOUT_MS = 15_000
  *
  * The in-flight promise is held for the run, so two windows opening a picker
  * share one process; a failure is not, so a login made after launch is found.
- * `forget` drops it when the key changes, since the key is the account.
  */
 export function createModelLister(deps: {
   dataDir: string
-  apiKeys: ApiKeyStore
   executable: string | undefined
   version: string
 }) {
@@ -63,7 +60,7 @@ export function createModelLister(deps: {
         ...(deps.executable
           ? { pathToClaudeCodeExecutable: deps.executable }
           : {}),
-        env: sdkEnv(await deps.apiKeys.get(), deps.version),
+        env: sdkEnv(deps.version),
       },
     })
 
@@ -97,9 +94,6 @@ export function createModelLister(deps: {
         return []
       })
       return asking
-    },
-    forget() {
-      asking = null
     },
   }
 }

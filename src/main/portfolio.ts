@@ -29,29 +29,31 @@ export class Portfolio {
   async add(
     input: NewTransaction
   ): Promise<{ transaction: Transaction; all: Transaction[] }> {
-    const symbol = input.symbol.trim().toUpperCase()
-    if (!symbol) throw new Error("Thiếu mã")
-    if (!(input.quantity > 0)) throw new Error("Khối lượng phải lớn hơn 0")
-    if (!(input.price >= 0)) throw new Error("Giá không hợp lệ")
-    if (!(input.fee >= 0)) throw new Error("Phí không hợp lệ")
-    if (Number.isNaN(Date.parse(input.date)))
-      throw new Error("Ngày không hợp lệ")
-
-    const transaction: Transaction = {
-      id: randomUUID(),
-      key: toKey(input.market, symbol),
-      market: input.market,
-      symbol,
-      side: input.side,
-      quantity: input.quantity,
-      price: input.price,
-      fee: input.fee,
-      date: input.date,
-      note: input.note.trim(),
-    }
+    const transaction = clean(randomUUID(), input)
     const all = await this.file.update((ledger) => {
       const next = [...ledger, transaction]
       // Throws on an oversell, which leaves the file as it was.
+      computeHoldings(next)
+      return next
+    })
+    return { transaction, all }
+  }
+
+  /**
+   * A correction keeps the trade's id and its place among same-day trades,
+   * and is validated like an add: moving a buy later or shrinking it can
+   * strand a sell, and that is refused.
+   */
+  async update(
+    id: string,
+    input: NewTransaction
+  ): Promise<{ transaction: Transaction; all: Transaction[] }> {
+    const transaction = clean(id, input)
+    const all = await this.file.update((ledger) => {
+      if (!ledger.some((each) => each.id === id)) {
+        throw new Error("Không tìm thấy giao dịch")
+      }
+      const next = ledger.map((each) => (each.id === id ? transaction : each))
       computeHoldings(next)
       return next
     })
@@ -68,5 +70,27 @@ export class Portfolio {
       computeHoldings(next)
       return next
     })
+  }
+}
+
+/** A trade as typed, checked field by field and normalised. */
+function clean(id: string, input: NewTransaction): Transaction {
+  const symbol = input.symbol.trim().toUpperCase()
+  if (!symbol) throw new Error("Thiếu mã")
+  if (!(input.quantity > 0)) throw new Error("Khối lượng phải lớn hơn 0")
+  if (!(input.price >= 0)) throw new Error("Giá không hợp lệ")
+  if (!(input.fee >= 0)) throw new Error("Phí không hợp lệ")
+  if (Number.isNaN(Date.parse(input.date))) throw new Error("Ngày không hợp lệ")
+  return {
+    id,
+    key: toKey(input.market, symbol),
+    market: input.market,
+    symbol,
+    side: input.side,
+    quantity: input.quantity,
+    price: input.price,
+    fee: input.fee,
+    date: input.date,
+    note: input.note.trim(),
   }
 }

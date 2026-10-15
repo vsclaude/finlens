@@ -24,7 +24,7 @@ Three processes' worth of code and one contract:
 
 Everything lives under `~/.finlens`, one JSON file per concern, each written
 whole through a temp file and a rename (`main/json-file.ts`): `settings.json`,
-`watchlist.json`, `portfolio.json`, `ai-threads.json`, `api-key.json`. Settings
+`watchlist.json`, `portfolio.json`, `ai-threads.json`. Settings
 are read through their defaults, so adding one never needs a migration. A file
 the app no longer reads is left where it is rather than deleted.
 
@@ -83,8 +83,9 @@ A ledger of trades, never a table of holdings: holdings are derived on every
 read (`computeHoldings`), so editing or removing a trade can never leave a
 stale position. Average-cost accounting, because that is what Vietnamese
 brokers show; a sell realises against the average and leaves it alone. A sell
-of more than was held on its date is refused — on add, and on removing the buy
-it depended on.
+of more than was held on its date is refused — on add, on an edit, and on
+removing the buy it depended on. An edit keeps the trade's id and its place
+among same-day trades, and reuses the add dialog.
 
 Prices are in the instrument's own currency (VND for `vn`, USD otherwise) and
 totals are converted to the base currency setting through Yahoo's `USDVND=X`.
@@ -97,10 +98,21 @@ Claude through the **Claude Agent SDK** — the same engine as Claude Code, with
 the coding taken out:
 
 - Built-in tools are cut to `WebSearch` and `WebFetch` (news). Everything else
-  it can do is six in-process MCP tools (`main/ai/tools.ts`): quotes,
-  technicals, performance comparison, the crypto overview, the watchlist and
-  the portfolio. All read-only — a trade the model "records" would be a trade
-  nobody made.
+  it can do is ten in-process MCP tools (`main/ai/tools.ts`): quotes,
+  technicals, every timeframe of one instrument at once, a technical scan of
+  many (the watchlist and holdings when given none), performance comparison,
+  return correlation, the crypto overview, the watchlist, the portfolio and a
+  position-size calculator. All read-only — a trade the model "records" would
+  be a trade nobody made.
+- Arithmetic that decides money is a tool, not the model's: `position_size`
+  (`shared/portfolio.ts`, lots of 100 for Vietnamese stocks) because a
+  misplaced zero there is the one mistake that costs real money, and
+  `get_correlation` (`shared/indicators.ts`) because pairing bars across
+  providers needs each market's own day — Binance, Yahoo and VNDirect stamp
+  the same daily session at different hours.
+- The prompt carries the Vietnamese market's rules the model would otherwise
+  get wrong in a trade idea: price bands per exchange, lots, T+2 and no
+  retail shorting.
 - Isolated from the user's own Claude Code configuration: no settings files,
   no CLAUDE.md, no other MCP servers, `dontAsk` so anything off the
   allow-list is refused instead of prompting a terminal nobody is watching.
@@ -108,13 +120,12 @@ the coding taken out:
   number must come from a tool result in the conversation.
 - Each thread keeps the SDK session id, so a follow-up resumes with the
   conversation behind it.
-- Auth: a key saved in Settings (sealed by the OS keychain), else
-  `ANTHROPIC_API_KEY`, else the user's own `claude` login on the machine.
-- The model and its effort level are picked in the composer (the same
-  `ModelMenu` sits in Settings), after Visual Studio Claude's picker. **The rows
+- Auth: `ANTHROPIC_API_KEY` from the environment the app starts in, else the
+  user's own `claude` login on the machine. The app keeps no key of its own.
+- The model and its effort level are picked in the composer, after Visual
+  Studio Claude's picker. **The rows
   are the CLI's**, asked through the SDK's `supportedModels()` — a process and
-  no tokens, ~2.5s cold, held for the run and dropped when the API key changes
-  (`main/ai/models.ts`). A written list was the earlier design and is wrong in
+  no tokens, ~2.5s cold, held for the run (`main/ai/models.ts`). A written list was the earlier design and is wrong in
   one direction or the other: which models exist is a property of the account,
   so it either offers one the account cannot use or hides one it pays for.
   When the CLI cannot be asked, the picker falls back to the three aliases
@@ -125,7 +136,12 @@ the coding taken out:
   about two cents.
 
 A turn streams into a working copy of its thread, pushed to the windows every
-80ms and written to disk once when it ends. `Analyst` takes the runner as a
+80ms and written to disk once when it ends. Each answer keeps its own cost
+and end time, shown under it. A rename reaches the running turn's working
+copy too, or the turn's final save would write the old title back; it leaves
+`updatedAt` alone so the thread does not jump under the cursor. A failed or
+stopped last answer offers "Thử lại", which asks the same question again as
+a new turn. `Analyst` takes the runner as a
 function, so `test/analyst.ts` drives the whole lifecycle with a script and no
 model.
 
@@ -134,3 +150,19 @@ model.
 The template shipped a todo list to show each layer once. It went when the
 first real feature arrived, as the template asked; nothing of it was ever on a
 FinLens user's disk.
+
+## Settings, trimmed
+
+Settings is appearance and the analyst's language. Four things left it:
+
+- **The model picker.** It was the composer's `ModelMenu` a second time; the
+  model is chosen where the question is asked, and two places to set one
+  setting is one too many.
+- **The data folder** and its "Mở" button (`revealPath`). Nobody needs to find
+  `~/.finlens` to use the app; `AppInfo` no longer carries the path.
+- **`pickDirectory`**, the template's folder picker, which nothing called.
+- **The API key field.** The analyst runs Claude Code, which already has the
+  user's login and reads `ANTHROPIC_API_KEY`; a third place to keep a key was
+  a sealed file (`api-key-store.ts`, `host.encrypt`), two channels and a
+  cache to drop when the key changed, for something Claude Code already does.
+  An `api-key.json` already on disk is left alone and no longer read.

@@ -83,7 +83,7 @@ missing preload thunk. The renderer reaches the contract through the
 `main.ts` creates the window and calls `registerIpc()` (`electron-ipc.ts`);
 `ipc.ts` owns every handler and the long-lived state as **`createIpc(host)`**, a
 table keyed by channel that **does not import `electron`**, so the tests can
-import it. What needs Electron itself — dialogs, windows, the shell — is
+import it. What needs Electron itself — the windows, the packaged binary's path — is
 `main/host.ts`, implemented by `electron-ipc.ts`. A handler that needs one of
 those asks `host`; nothing under `src/main/` that `ipc.ts` imports may reach
 `electron`.
@@ -103,8 +103,6 @@ those asks `host`; nothing under `src/main/` that `ipc.ts` imports may reach
 - **`watchlist.ts`**, **`portfolio.ts`** — `JsonFile` stores in the shape every
   feature follows. The portfolio stores the trade ledger only; holdings are
   always derived (`shared/portfolio.ts`), and an oversell is refused there.
-- **`api-key-store.ts`** — the Anthropic key, sealed by `host.encrypt`
-  (`safeStorage`), in its own file rather than `settings.json`.
 - **`ai/`** — `analyst.ts` owns threads and turns and knows nothing of the SDK;
   `claude.ts` is the runner over the Agent SDK; `tools.ts` the read-only MCP
   tools the model gets; `prompt.ts` the system prompt.

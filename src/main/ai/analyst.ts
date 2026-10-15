@@ -50,6 +50,9 @@ const PUSH_EVERY_MS = 80
 export class Analyst {
   private readonly file: JsonFile<AiThread[]>
   private readonly running = new Map<string, AbortController>()
+  /** The working copy of each running thread, which is what the turn writes
+   * over the saved one when it ends — so a rename has to reach it too. */
+  private readonly live = new Map<string, AiThread>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
 
   constructor(
@@ -121,6 +124,7 @@ export class Analyst {
 
     const controller = new AbortController()
     this.running.set(thread.id, controller)
+    this.live.set(thread.id, thread)
     await this.save(thread, !existing)
     this.events.changed(thread)
 
@@ -153,6 +157,7 @@ export class Analyst {
         },
       })
       thread.costUsd += costUsd
+      answer.costUsd = costUsd
     } catch (error) {
       answer.error = controller.signal.aborted
         ? "Đã dừng."
@@ -161,8 +166,10 @@ export class Analyst {
           : String(error)
     } finally {
       this.running.delete(thread.id)
+      this.live.delete(thread.id)
       thread.status = "idle"
       thread.updatedAt = new Date().toISOString()
+      answer.finishedAt = thread.updatedAt
       const timer = this.timers.get(thread.id)
       if (timer) clearTimeout(timer)
       this.timers.delete(thread.id)
@@ -202,6 +209,23 @@ export class Analyst {
 
   async cancel(threadId: string): Promise<void> {
     this.running.get(threadId)?.abort()
+  }
+
+  /** Leaves `updatedAt` alone: a rename is not news, and moving the thread to
+   * the top of the list under the cursor would be. */
+  async rename(threadId: string, title: string): Promise<void> {
+    const text = title.trim().replace(/\s+/g, " ").slice(0, 120)
+    if (!text) throw new Error("Tên trống")
+    const working = this.live.get(threadId)
+    if (working) working.title = text
+    let renamed: AiThread | undefined
+    await this.file.update((threads) =>
+      threads.map((each) =>
+        each.id === threadId ? (renamed = { ...each, title: text }) : each
+      )
+    )
+    if (!renamed) throw new Error("Không tìm thấy cuộc hội thoại")
+    this.events.changed(working ?? renamed)
   }
 
   async remove(threadId: string): Promise<void> {

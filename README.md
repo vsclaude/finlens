@@ -19,8 +19,8 @@ in Vietnamese.
   continue the conversation
 
 Market data is keyless: Binance, VNDirect, Yahoo Finance, CoinGecko and
-alternative.me. The analyst uses an Anthropic API key from Settings, or
-`ANTHROPIC_API_KEY`, or your existing Claude Code login.
+alternative.me. The analyst uses `ANTHROPIC_API_KEY` from the environment, or
+your existing Claude Code login.
 
 ## Start
 
@@ -50,7 +50,7 @@ src/
   shared/    the contract (api.ts) and the logic both sides run:
              indicators.ts, portfolio.ts, market.ts
   main/      Electron main — ipc.ts (handlers), market/ (providers + cache),
-             watchlist.ts, portfolio.ts, api-key-store.ts, ai/ (analyst,
+             watchlist.ts, portfolio.ts, ai/ (analyst,
              Agent SDK runner, MCP tools, prompt)
   preload/   index.ts — the one bridge, window.desktop
   renderer/  React — App.tsx, components/pages/, components/charts/,

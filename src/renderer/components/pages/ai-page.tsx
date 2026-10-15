@@ -3,12 +3,15 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   BotIcon,
+  CalculatorIcon,
   CheckIcon,
-  ChevronRightIcon,
   CopyIcon,
   GlobeIcon,
   LineChartIcon,
   MessageSquarePlusIcon,
+  PencilIcon,
+  RotateCcwIcon,
+  SearchIcon,
   SquareIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -20,35 +23,67 @@ import type { AiMessage, AiThread, AiToolUse } from "@shared/api"
 import { Markdown } from "@/components/markdown"
 import { ModelMenu } from "@/components/model-menu"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { useAi } from "@/lib/ai"
+import { threadMarkdown, useAi } from "@/lib/ai"
 import { useNav } from "@/lib/nav"
 import { cn, errorMessage } from "@/lib/utils"
 
 const STARTERS = [
   "Tổng quan thị trường crypto hôm nay: tâm lý, dòng tiền, đồng nào mạnh/yếu nhất?",
+  "Quét kỹ thuật watchlist và danh mục của tôi: mã nào đang mạnh, mã nào cần chú ý?",
+  "Phân tích FPT đa khung thời gian và đề xuất kịch bản giao dịch kèm khối lượng vào lệnh.",
+  "Đánh giá danh mục của tôi: tỷ trọng, mức tương quan giữa các mã và đề xuất tái cơ cấu.",
   "So sánh hiệu suất 90 ngày của BTC, ETH, VN-Index và S&P 500 — lợi nhuận, biến động, sụt giảm tối đa.",
-  "Phân tích kỹ thuật FPT khung ngày và đề xuất kịch bản giao dịch.",
-  "Đánh giá danh mục của tôi và đề xuất tái cơ cấu.",
+  "Tin tức nào đang tác động đến VN-Index tuần này?",
 ]
 
 /** What each tool is, in the transcript's words. */
 const TOOL_LABEL: Record<string, string> = {
   get_quotes: "Lấy giá",
   get_technicals: "Phân tích kỹ thuật",
+  get_multi_timeframe: "Đa khung thời gian",
+  scan_technicals: "Quét kỹ thuật",
   compare_performance: "So sánh hiệu suất",
+  get_correlation: "Tương quan",
   get_crypto_overview: "Tổng quan crypto",
   get_watchlist: "Đọc watchlist",
   get_portfolio: "Đọc danh mục",
+  position_size: "Tính khối lượng",
   WebSearch: "Tìm kiếm web",
   WebFetch: "Đọc trang web",
 }
 
+const CHART_TOOLS = new Set([
+  "get_technicals",
+  "get_multi_timeframe",
+  "scan_technicals",
+  "compare_performance",
+  "get_correlation",
+])
+
 function toolIcon(name: string): LucideIcon {
   if (name.startsWith("Web")) return GlobeIcon
-  if (name === "get_technicals" || name === "compare_performance")
-    return LineChartIcon
+  if (CHART_TOOLS.has(name)) return LineChartIcon
+  if (name === "position_size") return CalculatorIcon
   return WrenchIcon
+}
+
+/** "12s", "1m 05s". */
+function duration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  return seconds < 60
+    ? `${seconds}s`
+    : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`
+}
+
+/** Accents and đ folded away, so "dau tu" finds "Đầu tư". */
+function searchable(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
 }
 
 export function AiPage() {
@@ -56,11 +91,27 @@ export function AiPage() {
   const threadId = useNav((state) => state.threadId)
   const openThread = useNav((state) => state.openThread)
   const thread = threads.find((each) => each.id === threadId) ?? null
+  const [query, setQuery] = useState("")
+  const needle = searchable(query.trim())
+  // The title and the questions: an answer's text would match nearly every
+  // thread on any market word.
+  const shown = needle
+    ? threads.filter((each) =>
+        searchable(
+          [
+            each.title,
+            ...each.messages
+              .filter((m) => m.role === "user")
+              .map((m) => m.text),
+          ].join("\n")
+        ).includes(needle)
+      )
+    : threads
 
   return (
     <div className="flex h-full min-h-0">
       <aside className="flex w-60 shrink-0 flex-col border-r border-border">
-        <div className="p-3">
+        <div className="flex flex-col gap-2 p-3">
           <Button
             variant="outline"
             size="sm"
@@ -70,9 +121,24 @@ export function AiPage() {
             <MessageSquarePlusIcon />
             Phân tích mới
           </Button>
+          {threads.length > 0 && (
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setQuery("")
+                }}
+                placeholder="Tìm cuộc hội thoại…"
+                spellCheck={false}
+                className="h-7 pl-7 text-xs"
+              />
+            </div>
+          )}
         </div>
         <ul className="flex-1 overflow-y-auto px-2 pb-2">
-          {threads.map((each) => (
+          {shown.map((each) => (
             <li key={each.id}>
               <button
                 type="button"
@@ -100,9 +166,11 @@ export function AiPage() {
               </button>
             </li>
           ))}
-          {threads.length === 0 && (
+          {shown.length === 0 && (
             <li className="px-2.5 py-6 text-center text-xs text-muted-foreground">
-              Chưa có cuộc hội thoại nào.
+              {threads.length === 0
+                ? "Chưa có cuộc hội thoại nào."
+                : "Không tìm thấy."}
             </li>
           )}
         </ul>
@@ -136,7 +204,7 @@ function Conversation({ thread }: { thread: AiThread | null }) {
     .reverse()
     .find((each) => each.role === "user")?.createdAt
 
-  // Markdown, tables and the tool fold change height after the text that
+  // Markdown, tables and the tool list change height after the text that
   // caused them lands, so the size of the content is what keeps the view at
   // the bottom — not the message count.
   useEffect(() => {
@@ -188,9 +256,18 @@ function Conversation({ thread }: { thread: AiThread | null }) {
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-5">
         <BotIcon className="size-4 text-primary" />
-        <h1 className="flex-1 truncate text-sm font-medium">
-          {thread?.title ?? "AI Analyst"}
-        </h1>
+        {thread ? (
+          <Title thread={thread} />
+        ) : (
+          <h1 className="flex-1 truncate text-sm font-medium">AI Analyst</h1>
+        )}
+        {thread && (
+          <CopyButton
+            text={threadMarkdown(thread)}
+            label="Sao chép cả cuộc hội thoại (Markdown)"
+            size="icon-sm"
+          />
+        )}
         {thread && (
           <Button
             size="icon-sm"
@@ -230,6 +307,16 @@ function Conversation({ thread }: { thread: AiThread | null }) {
                 key={message.id}
                 message={message}
                 live={running && i === messages.length - 1}
+                onRetry={
+                  // Only the last answer: asking again appends a turn, and
+                  // the retry of an older one would land after the newest.
+                  !running &&
+                  i === messages.length - 1 &&
+                  message.error &&
+                  messages[i - 1]?.role === "user"
+                    ? () => void send(messages[i - 1]!.text)
+                    : undefined
+                }
               />
             ))}
             {running && last && (
@@ -350,7 +437,70 @@ function Welcome({ onPick }: { onPick: (text: string) => void }) {
   )
 }
 
-function Message({ message, live }: { message: AiMessage; live: boolean }) {
+/**
+ * The thread's name, renamed in place: a click turns it into a field, Enter
+ * or leaving it saves, Escape puts it back.
+ */
+function Title({ thread }: { thread: AiThread }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(thread.title)
+
+  function save() {
+    setEditing(false)
+    const next = value.trim()
+    if (next && next !== thread.title) {
+      void window.desktop.renameThread(thread.id, next)
+    }
+  }
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onFocus={(event) => event.currentTarget.select()}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return
+          if (event.key === "Enter") save()
+          else if (event.key === "Escape") {
+            setValue(thread.title)
+            setEditing(false)
+          }
+        }}
+        maxLength={120}
+        className="h-7 flex-1 text-sm font-medium"
+      />
+    )
+  }
+  return (
+    <h1 className="group flex min-w-0 flex-1 items-center gap-1">
+      <button
+        type="button"
+        title="Đổi tên"
+        onClick={() => {
+          setValue(thread.title)
+          setEditing(true)
+        }}
+        className="flex min-w-0 items-center gap-1.5 rounded px-1 text-sm font-medium hover:bg-accent/50"
+      >
+        <span className="truncate">{thread.title}</span>
+        <PencilIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      </button>
+    </h1>
+  )
+}
+
+function Message({
+  message,
+  live,
+  onRetry,
+}: {
+  message: AiMessage
+  live: boolean
+  onRetry?: () => void
+}) {
   if (message.role === "user") {
     return (
       <div className="group flex flex-col items-end gap-1">
@@ -372,7 +522,7 @@ function Message({ message, live }: { message: AiMessage; live: boolean }) {
   return (
     <div className="flex flex-col gap-2">
       {message.tools.length > 0 && (
-        <ToolFold tools={message.tools} live={live && !message.text} />
+        <ToolList tools={message.tools} live={live && !message.text} />
       )}
       {message.text && <Markdown text={message.text} />}
       {message.error && (
@@ -381,9 +531,30 @@ function Message({ message, live }: { message: AiMessage; live: boolean }) {
           {message.error}
         </div>
       )}
-      {!live && message.text && (
-        <div className="-mt-1 flex">
-          <CopyButton text={message.text} label="Sao chép câu trả lời" />
+      {!live && (message.text || onRetry) && (
+        <div className="-mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+          {message.text && (
+            <CopyButton text={message.text} label="Sao chép câu trả lời" />
+          )}
+          {onRetry && (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={onRetry}
+            >
+              <RotateCcwIcon />
+              Thử lại
+            </Button>
+          )}
+          {message.finishedAt && (
+            <span className="px-1 tabular-nums opacity-70">
+              {duration(
+                Date.parse(message.finishedAt) - Date.parse(message.createdAt)
+              )}
+              {message.costUsd ? ` · $${message.costUsd.toFixed(3)}` : ""}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -391,68 +562,50 @@ function Message({ message, live }: { message: AiMessage; live: boolean }) {
 }
 
 /**
- * A turn's tool calls as one line, closed by default: a reader wants the
- * answer, and eight chips above it pushed the answer below the fold. Opening
- * it gives each call its own row, with the input it was given.
+ * A turn's tool calls, one row each with the input it was given — always
+ * shown, so what the answer rests on is in view without a click. While the
+ * turn is still gathering data, the newest call carries the spinner.
  */
-function ToolFold({ tools, live }: { tools: AiToolUse[]; live: boolean }) {
-  const [open, setOpen] = useState(false)
-  const icons = [...new Set(tools.map((tool) => toolIcon(tool.name)))]
+function ToolList({ tools, live }: { tools: AiToolUse[]; live: boolean }) {
   return (
-    <div className="flex flex-col">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="flex w-fit items-center gap-1.5 rounded px-1 text-xs text-muted-foreground hover:text-foreground"
-      >
-        <ChevronRightIcon
-          className={cn("size-3 transition-transform", open && "rotate-90")}
-        />
-        {live && <Spinner className="size-3" />}
-        <span>
-          {live ? "Đang dùng" : "Đã dùng"} {tools.length} công cụ
-        </span>
-        <span className="flex items-center gap-1 opacity-70">
-          {icons.map((Icon, i) => (
-            <Icon key={i} className="size-3" />
-          ))}
-        </span>
-      </button>
-      {open && (
-        <ul className="mt-1 mb-1 ml-2.5 flex animate-fade flex-col gap-0.5 border-l border-border pl-2.5">
-          {tools.map((tool, i) => {
-            const Icon = toolIcon(tool.name)
-            return (
-              <li
-                key={i}
-                title={tool.detail}
-                className="flex min-w-0 items-baseline gap-1.5 text-[11px] text-muted-foreground"
-              >
-                <Icon className="size-3 shrink-0 translate-y-0.5" />
-                <span className="shrink-0 font-medium text-foreground/80">
-                  {TOOL_LABEL[tool.name] ?? tool.name}
-                </span>
-                {tool.detail && (
-                  <span className="truncate rounded bg-muted px-1 font-mono text-[10px]">
-                    {tool.detail}
-                  </span>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </div>
+    <ul className="flex flex-col gap-1">
+      {tools.map((tool, i) => {
+        const Icon = toolIcon(tool.name)
+        const working = live && i === tools.length - 1
+        return (
+          <li
+            key={i}
+            title={tool.detail}
+            className="flex min-w-0 animate-fade items-center gap-2 text-sm text-muted-foreground"
+          >
+            {working ? (
+              <Spinner className="size-4 shrink-0" />
+            ) : (
+              <Icon className="size-4 shrink-0" />
+            )}
+            <span className="shrink-0 font-medium text-foreground/80">
+              {TOOL_LABEL[tool.name] ?? tool.name}
+            </span>
+            {tool.detail && (
+              <span className="truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                {tool.detail}
+              </span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
 function CopyButton({
   text,
   label = "Sao chép",
+  size = "icon-xs",
 }: {
   text: string
   label?: string
+  size?: "icon-xs" | "icon-sm"
 }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
@@ -462,7 +615,7 @@ function CopyButton({
   }, [copied])
   return (
     <Button
-      size="icon-xs"
+      size={size}
       variant="ghost"
       aria-label={label}
       title={label}

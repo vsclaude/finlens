@@ -7,7 +7,7 @@
  * The preload's half cannot be imported here (it needs `electron`), but its
  * object is typed `DesktopApi`, so `tsc` refuses a missing thunk.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -30,11 +30,6 @@ const { createIpc } = await import("../src/main/ipc")
 const sent: { channel: string; payload: unknown }[] = []
 const host: Host = {
   send: (channel, payload) => sent.push({ channel, payload }),
-  pickDirectory: async () => "/picked",
-  reveal: async () => {},
-  encrypt: (text) => `sealed:${Buffer.from(text).toString("base64")}`,
-  decrypt: (sealed) =>
-    Buffer.from(sealed.replace(/^sealed:/, ""), "base64").toString(),
   claudeExecutable: undefined,
   version: "9.9.9",
 }
@@ -79,9 +74,8 @@ try {
   check("IPC and EVENTS are disjoint", overlap.length === 0, overlap)
 
   section("Handlers")
-  const info = (await call(IPC.appInfo)) as { version: string; dataDir: string }
+  const info = (await call(IPC.appInfo)) as { version: string }
   check("appInfo reads the host's version", info.version === "9.9.9", info)
-  check("appInfo reports the data dir", info.dataDir === dir, info)
 
   check(
     "a setting reads its default",
@@ -91,11 +85,6 @@ try {
   check(
     "a setting reads back",
     (await call(IPC.getSetting, "baseCurrency")) === "VND"
-  )
-
-  check(
-    "pickDirectory goes to the host",
-    (await call(IPC.pickDirectory)) === "/picked"
   )
 
   section("Market")
@@ -168,24 +157,6 @@ try {
     refused = true
   }
   check("an oversell is refused", refused)
-
-  section("AI key")
-  check(
-    "no key at first",
-    ((await call(IPC.getAiAuth)) as { savedKey: boolean }).savedKey === false
-  )
-  await call(IPC.setAiApiKey, "sk-ant-test")
-  check(
-    "a saved key is reported",
-    ((await call(IPC.getAiAuth)) as { savedKey: boolean }).savedKey === true
-  )
-  const onDisk = readFileSync(path.join(dir, "api-key.json"), "utf8")
-  check("and is not on disk in the clear", !onDisk.includes("sk-ant-test"))
-  await call(IPC.setAiApiKey, null)
-  check(
-    "null forgets it",
-    ((await call(IPC.getAiAuth)) as { savedKey: boolean }).savedKey === false
-  )
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }

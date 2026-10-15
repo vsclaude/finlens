@@ -8,9 +8,11 @@ import {
   aggregate,
   atr,
   bollinger,
+  correlation,
   ema,
   macd,
   performanceStats,
+  returnCorrelations,
   rsi,
   sma,
   technicalSummary,
@@ -109,6 +111,52 @@ check("return is first to last", close(p.returnPct, 10), p)
 check("drawdown is from the running peak", close(p.maxDrawdownPct, -25), p)
 check("volatility is positive", p.volatilityPct > 0)
 check("one bar is no answer", performanceStats(bars([1])) === null)
+
+section("correlation")
+check(
+  "a series with itself is 1",
+  close(correlation([1, 3, 2, 5], [1, 3, 2, 5]), 1)
+)
+check(
+  "with its mirror is −1",
+  close(correlation([1, 3, 2, 5], [-1, -3, -2, -5]), -1)
+)
+check("a flat series has none", correlation([1, 2, 3], [4, 4, 4]) === null)
+check("two points are no answer", correlation([1, 2], [2, 1]) === null)
+
+const DAY = 86_400
+const zig = [100, 110, 99, 120, 108, 130]
+// Same sessions stamped six hours apart, plus a bar only one side has: the
+// buckets have to pair them and drop the extra.
+const early = bars(zig, 1_700_006_400)
+const late = bars([...zig.map((c) => c * 2), 999], 1_700_006_400 + 6 * 3600)
+const pair = returnCorrelations(
+  [
+    { candles: early, offset: 0 },
+    { candles: late, offset: 0 },
+  ],
+  DAY
+)
+check("pairs bars by bucket, not stamp", pair.bars === zig.length, pair)
+check("proportional series correlate fully", close(pair.matrix[0]![1], 1))
+check("the diagonal is 1", pair.matrix[1]![1] === 1)
+const apart = returnCorrelations(
+  [
+    { candles: bars([1, 2, 3, 4], 0), offset: 0 },
+    { candles: bars([1, 2, 3, 4], 100 * DAY), offset: 0 },
+  ],
+  DAY
+)
+const recent = returnCorrelations(
+  [
+    { candles: early, offset: 0 },
+    { candles: late, offset: 0 },
+  ],
+  DAY,
+  4
+)
+check("limits to the latest shared bars", recent.bars === 4, recent)
+check("nothing shared is no answer", apart.matrix[0]![1] === null, apart)
 
 section("technicalSummary")
 const up = technicalSummary(

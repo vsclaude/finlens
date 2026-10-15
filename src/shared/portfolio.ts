@@ -203,3 +203,57 @@ export function valuePortfolio(
     unpriced,
   }
 }
+
+/** Vietnamese exchanges match stock orders in lots of 100 shares. */
+export const VN_LOT = 100
+
+export type PositionSize = {
+  side: "long" | "short"
+  quantity: number
+  /** What a fill at the stop loses: `quantity × |entry − stop|`. */
+  riskAmount: number
+  riskPct: number
+  positionValue: number
+  positionPct: number
+  /** True when the risk budget asked for more than the capital can buy. */
+  cappedByCapital: boolean
+  /** Prices 1R, 2R and 3R from the entry, in the trade's direction. */
+  targets: number[]
+}
+
+/**
+ * Fixed-fractional sizing: as many units as lose `riskPct` of `capital` if
+ * the stop is hit, rounded down to whole `lot`s and never more than the
+ * capital buys. Arithmetic the model is not left to do — a misplaced zero in
+ * a position size is the one mistake that costs real money.
+ */
+export function positionSize(input: {
+  capital: number
+  riskPct: number
+  entry: number
+  stop: number
+  lot?: number
+}): PositionSize | null {
+  const { capital, riskPct, entry, stop } = input
+  const lot = input.lot && input.lot > 0 ? input.lot : 1
+  const perUnit = Math.abs(entry - stop)
+  if (!(capital > 0 && riskPct > 0 && entry > 0 && stop > 0 && perUnit > 0)) {
+    return null
+  }
+  const byRisk = Math.floor((capital * riskPct) / 100 / perUnit / lot) * lot
+  const byCapital = Math.floor(capital / entry / lot) * lot
+  const quantity = Math.min(byRisk, byCapital)
+  const direction = stop < entry ? 1 : -1
+  const riskAmount = quantity * perUnit
+  const positionValue = quantity * entry
+  return {
+    side: direction === 1 ? "long" : "short",
+    quantity,
+    riskAmount,
+    riskPct: (riskAmount / capital) * 100,
+    positionValue,
+    positionPct: (positionValue / capital) * 100,
+    cappedByCapital: byCapital < byRisk,
+    targets: [1, 2, 3].map((r) => entry + direction * r * perUnit),
+  }
+}

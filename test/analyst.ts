@@ -98,6 +98,11 @@ try {
   check("tool calls are recorded", answer.tools[0]?.name === "get_technicals")
   check("the session is kept", done.sessionId === "s-1")
   check("the cost is added", Math.abs(done.costUsd - 0.02) < 1e-9)
+  check(
+    "the answer keeps its own cost and end",
+    answer.costUsd === 0.02 && typeof answer.finishedAt === "string",
+    answer
+  )
 
   section("A follow-up")
   await analyst.ask(id, "Còn ETH?")
@@ -107,16 +112,36 @@ try {
   check("adds to the same thread", after.messages.length === 4)
   check("costs accumulate", Math.abs(after.costUsd - 0.03) < 1e-9)
 
+  section("Rename")
+  await analyst.rename(id, "  BTC   tuần này ")
+  check("pushes the new title", changed.at(-1)?.title === "BTC tuần này")
+  await analyst.ask(id, "Còn SOL?")
+  await analyst.rename(id, "Đổi giữa chừng")
+  runs[2]!.release()
+  const renamed = await settled(id)
+  check(
+    "a rename mid-answer survives the turn's save",
+    renamed.title === "Đổi giữa chừng",
+    renamed.title
+  )
+  let blank = false
+  try {
+    await analyst.rename(id, "   ")
+  } catch {
+    blank = true
+  }
+  check("a blank title is refused", blank)
+
   section("Persistence")
   const reread = await new Analyst(dir, runner, events).list()
   check(
     "threads are on disk",
-    reread.length === 1 && reread[0]?.messages.length === 4
+    reread.length === 1 && reread[0]?.messages.length === 6
   )
 
   section("Failure and cancel")
   const failing = await analyst.ask(null, "Lỗi")
-  runs[2]!.fail("401 invalid x-api-key")
+  runs[3]!.fail("401 invalid x-api-key")
   const failed = await settled(failing)
   check(
     "an error is kept on the answer",
@@ -184,7 +209,7 @@ try {
   )
   check(
     "an auth failure explains itself",
-    explainError("401 Unauthorized").includes("API key")
+    explainError("401 Unauthorized").includes("/login")
   )
   check("anything else is left alone", explainError("boom") === "boom")
 } finally {

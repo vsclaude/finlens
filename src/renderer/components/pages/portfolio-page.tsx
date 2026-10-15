@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
-import { PlusIcon, SparklesIcon, Trash2Icon } from "lucide-react"
+import { PencilIcon, PlusIcon, SparklesIcon, Trash2Icon } from "lucide-react"
 
+import type { Transaction } from "@shared/api"
 import { MARKET_LABEL } from "@shared/market"
 import { sortLedger, type Valuation } from "@shared/portfolio"
 import { Change, toneClass } from "@/components/change"
@@ -30,7 +31,20 @@ import { useSettings } from "@/lib/settings"
 import { cn, errorMessage } from "@/lib/utils"
 
 export function PortfolioPage() {
-  const [adding, setAdding] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  // Kept through the closing animation, so the dialog does not flip from
+  // "Sửa" to "Thêm" while it fades out.
+  const [editing, setEditing] = useState<Transaction | null>(null)
+  // A fresh dialog per opening: reopening a trade after a cancelled edit
+  // shows the trade, not the abandoned changes.
+  const [opening, setOpening] = useState(0)
+
+  function openDialog(trade: Transaction | null) {
+    setError(null)
+    setEditing(trade)
+    setOpening((n) => n + 1)
+    setDialogOpen(true)
+  }
   const [error, setError] = useState<string | null>(null)
   const transactions = usePortfolio((state) => state.transactions)
   const base = useSettings((state) => state.baseCurrency)
@@ -77,7 +91,7 @@ export function PortfolioPage() {
             <SparklesIcon />
             AI đánh giá
           </Button>
-          <Button size="sm" onClick={() => setAdding(true)}>
+          <Button size="sm" onClick={() => openDialog(null)}>
             <PlusIcon />
             Thêm giao dịch
           </Button>
@@ -236,14 +250,18 @@ export function PortfolioPage() {
                   <TableHead className="text-right">Phí</TableHead>
                   <TableHead className="text-right">Thành tiền</TableHead>
                   <TableHead>Ghi chú</TableHead>
-                  <TableHead className="w-10 pr-4" />
+                  <TableHead className="w-16 pr-4" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {ledger.map((trade) => {
                   const currency = trade.market === "vn" ? "VND" : "USD"
                   return (
-                    <TableRow key={trade.id} className="group">
+                    <TableRow
+                      key={trade.id}
+                      className="group cursor-pointer"
+                      onDoubleClick={() => openDialog(trade)}
+                    >
                       <TableCell className="tabular pl-4">
                         {trade.date.slice(0, 10)}
                       </TableCell>
@@ -278,22 +296,33 @@ export function PortfolioPage() {
                         {trade.note}
                       </TableCell>
                       <TableCell className="pr-4">
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          aria-label="Xoá giao dịch"
-                          className="opacity-0 group-hover:opacity-100"
-                          onClick={() => {
-                            setError(null)
-                            window.desktop
-                              .removeTransaction(trade.id)
-                              .catch((caught: unknown) =>
-                                setError(errorMessage(caught))
-                              )
-                          }}
-                        >
-                          <Trash2Icon />
-                        </Button>
+                        <div className="flex justify-end gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            aria-label="Sửa giao dịch"
+                            title="Sửa"
+                            onClick={() => openDialog(trade)}
+                          >
+                            <PencilIcon />
+                          </Button>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            aria-label="Xoá giao dịch"
+                            title="Xoá"
+                            onClick={() => {
+                              setError(null)
+                              window.desktop
+                                .removeTransaction(trade.id)
+                                .catch((caught: unknown) =>
+                                  setError(errorMessage(caught))
+                                )
+                            }}
+                          >
+                            <Trash2Icon />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )
@@ -304,7 +333,12 @@ export function PortfolioPage() {
         </>
       )}
 
-      <TransactionDialog open={adding} onOpenChange={setAdding} />
+      <TransactionDialog
+        key={opening}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        editing={editing}
+      />
     </Page>
   )
 }

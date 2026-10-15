@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react"
+import { CheckIcon } from "lucide-react"
 import { useTheme } from "next-themes"
 
-import type { AiAuth, AiLanguage, AppInfo, Palette } from "@shared/api"
-import { ModelMenu } from "@/components/model-menu"
+import type { AiLanguage, AppInfo, Palette } from "@shared/api"
 import { Segmented } from "@/components/segmented"
-import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -12,8 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { forgetAiModels } from "@/lib/ai-models"
 import { useSettings } from "@/lib/settings"
 import { cn } from "@/lib/utils"
 
@@ -28,11 +25,21 @@ const SWATCHES: Record<Palette, string> = {
   amber: "oklch(0.72 0.15 70)",
 }
 const PALETTES = Object.keys(SWATCHES) as Palette[]
-const THEMES = ["system", "light", "dark"] as const
+
+const PALETTE_LABEL: Record<Palette, string> = {
+  indigo: "Chàm",
+  graphite: "Than chì",
+  teal: "Xanh ngọc",
+  rose: "Hồng",
+  amber: "Hổ phách",
+}
+
+type Theme = "system" | "light" | "dark"
 
 /**
- * Settings: appearance, the analyst (model, language, API key), and where the
- * app keeps its files.
+ * Settings: appearance and the analyst's language, as rows of a label on the
+ * left and its control on the right. The model is picked in the AI page's
+ * composer, where the choice is made.
  */
 export function SettingsDialog({
   open,
@@ -46,139 +53,76 @@ export function SettingsDialog({
   const language = useSettings((state) => state.aiLanguage)
   const setSetting = useSettings((state) => state.set)
   const [info, setInfo] = useState<AppInfo | null>(null)
-  const [auth, setAuth] = useState<AiAuth | null>(null)
-  const [key, setKey] = useState("")
 
   useEffect(() => {
     if (!open) return
     void window.desktop.appInfo().then(setInfo)
-    void window.desktop.getAiAuth().then(setAuth)
   }, [open])
-
-  async function saveKey(value: string | null) {
-    await window.desktop.setAiApiKey(value)
-    forgetAiModels()
-    setKey("")
-    setAuth(await window.desktop.getAiAuth())
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="gap-5 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Cài đặt</DialogTitle>
           <DialogDescription>
-            {info ? `${info.name} ${info.version}` : " "}
+            {info ? `${info.name} · phiên bản ${info.version}` : " "}
           </DialogDescription>
         </DialogHeader>
 
-        <Section title="Giao diện">
-          <div className="flex gap-1">
-            {THEMES.map((each) => (
-              <Button
-                key={each}
-                size="sm"
-                variant={theme === each ? "secondary" : "ghost"}
-                onClick={() => setTheme(each)}
-                className="capitalize"
-              >
-                {each}
-              </Button>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            {PALETTES.map((each) => (
-              <button
-                key={each}
-                type="button"
-                title={each}
-                aria-label={each}
-                style={{ backgroundColor: SWATCHES[each] }}
-                onClick={() => void setSetting("palette", each)}
-                className={cn(
-                  "size-6 rounded-full ring-offset-2 ring-offset-background",
-                  palette === each && "ring-2 ring-ring"
-                )}
-              />
-            ))}
-          </div>
-        </Section>
-
-        <Section title="AI Analyst">
-          <div>
-            <ModelMenu
-              side="bottom"
-              className="-ml-1.5 h-8 text-sm text-foreground"
+        <Group title="Giao diện">
+          <Row label="Chế độ hiển thị" hint="Phím tắt: D">
+            <Segmented<Theme>
+              value={(theme as Theme | undefined) ?? "system"}
+              onChange={setTheme}
+              options={[
+                { value: "system", label: "Theo hệ thống" },
+                { value: "light", label: "Sáng" },
+                { value: "dark", label: "Tối" },
+              ]}
             />
-          </div>
-          <Segmented<AiLanguage>
-            value={language}
-            onChange={(next) => void setSetting("aiLanguage", next)}
-            options={[
-              { value: "vi", label: "Tiếng Việt" },
-              { value: "en", label: "English" },
-            ]}
-          />
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs text-muted-foreground">
-              Anthropic API key —{" "}
-              {auth?.savedKey
-                ? "đã lưu (mã hoá bằng keychain của hệ điều hành)"
-                : auth?.envKey
-                  ? "đang dùng ANTHROPIC_API_KEY từ môi trường"
-                  : "chưa có; sẽ dùng tài khoản Claude Code đã đăng nhập trên máy"}
-            </span>
-            <div className="flex gap-2">
-              <Input
-                type="password"
-                value={key}
-                onChange={(event) => setKey(event.target.value)}
-                placeholder="sk-ant-…"
-                autoComplete="off"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!key.trim()}
-                onClick={() => void saveKey(key)}
-              >
-                Lưu
-              </Button>
-              {auth?.savedKey && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void saveKey(null)}
+          </Row>
+          <Row label="Màu nhấn" hint={PALETTE_LABEL[palette]}>
+            <div role="radiogroup" className="flex items-center gap-2">
+              {PALETTES.map((each) => (
+                <button
+                  key={each}
+                  type="button"
+                  role="radio"
+                  aria-checked={palette === each}
+                  title={PALETTE_LABEL[each]}
+                  aria-label={PALETTE_LABEL[each]}
+                  style={{ backgroundColor: SWATCHES[each] }}
+                  onClick={() => void setSetting("palette", each)}
+                  className={cn(
+                    "flex size-6 items-center justify-center rounded-full text-white ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
+                    palette === each && "ring-2 ring-ring hover:ring-ring"
+                  )}
                 >
-                  Xoá
-                </Button>
-              )}
+                  {palette === each && <CheckIcon className="size-3.5" />}
+                </button>
+              ))}
             </div>
-          </div>
-        </Section>
+          </Row>
+        </Group>
 
-        {info && (
-          <Section title="Dữ liệu">
-            <div className="flex items-center gap-2">
-              <code className="flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">
-                {info.dataDir}
-              </code>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void window.desktop.revealPath(info.dataDir)}
-              >
-                Mở
-              </Button>
-            </div>
-          </Section>
-        )}
+        <Group title="AI Analyst">
+          <Row label="Ngôn ngữ trả lời" hint="Áp dụng từ câu hỏi tiếp theo">
+            <Segmented<AiLanguage>
+              value={language}
+              onChange={(next) => void setSetting("aiLanguage", next)}
+              options={[
+                { value: "vi", label: "Tiếng Việt" },
+                { value: "en", label: "English" },
+              ]}
+            />
+          </Row>
+        </Group>
       </DialogContent>
     </Dialog>
   )
 }
 
-function Section({
+function Group({
   title,
   children,
 }: {
@@ -187,8 +131,32 @@ function Section({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
-      {children}
+      <h3 className="px-1 text-xs font-medium text-muted-foreground">
+        {title}
+      </h3>
+      <div className="divide-y divide-border rounded-lg ring-1 ring-foreground/8">
+        {children}
+      </div>
     </section>
+  )
+}
+
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex min-h-14 items-center justify-between gap-4 px-4 py-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-sm font-medium">{label}</span>
+        {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+      </div>
+      {children}
+    </div>
   )
 }

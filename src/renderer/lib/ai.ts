@@ -16,6 +16,21 @@ function upsert(threads: AiThread[], thread: AiThread): AiThread[] {
   )
 }
 
+/** A whole thread as one Markdown document, for the clipboard. */
+export function threadMarkdown(thread: AiThread): string {
+  const parts = [`# ${thread.title}`]
+  for (const message of thread.messages) {
+    if (message.role === "user") {
+      parts.push(`## Hỏi\n\n${message.text}`)
+    } else if (message.text || message.error) {
+      parts.push(
+        `## FinLens Analyst\n\n${[message.text, message.error && `> ${message.error}`].filter(Boolean).join("\n\n")}`
+      )
+    }
+  }
+  return parts.join("\n\n") + "\n"
+}
+
 /**
  * The analyst's threads, newest first. A streaming answer arrives as the
  * whole thread, pushed a few times a second by main.

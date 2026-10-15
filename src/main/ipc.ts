@@ -12,7 +12,6 @@ import { APP_NAME } from "../shared/app"
 import { Analyst } from "./ai/analyst"
 import { createClaudeRunner } from "./ai/claude"
 import { createModelLister } from "./ai/models"
-import { ApiKeyStore } from "./api-key-store"
 import { dataDir } from "./data-dir"
 import type { Host } from "./host"
 import { MarketData } from "./market/market-data"
@@ -60,10 +59,8 @@ export function createIpc(
   const settings = new SettingsStore(dir)
   const watchlist = new Watchlist(dir)
   const portfolio = new Portfolio(dir)
-  const apiKeys = new ApiKeyStore(dir, host)
   const models = createModelLister({
     dataDir: dir,
-    apiKeys,
     executable: host.claudeExecutable,
     version: host.version,
   })
@@ -73,7 +70,6 @@ export function createIpc(
       dataDir: dir,
       context: { market, watchlist, portfolio, settings },
       settings,
-      apiKeys,
       executable: host.claudeExecutable,
       version: host.version,
     }),
@@ -86,7 +82,6 @@ export function createIpc(
   handle(IPC.appInfo, () => ({
     name: APP_NAME,
     version: host.version,
-    dataDir: dir,
   }))
 
   handle(IPC.getSetting, (_caller, key: keyof Settings) => settings.get(key))
@@ -95,9 +90,6 @@ export function createIpc(
     <K extends keyof Settings>(_caller: unknown, key: K, value: Settings[K]) =>
       settings.set(key, value)
   )
-
-  handle(IPC.pickDirectory, () => host.pickDirectory())
-  handle(IPC.revealPath, (_caller, target: string) => host.reveal(target))
 
   handle(IPC.getQuotes, (_caller, keys: InstrumentKey[]) => market.quotes(keys))
   handle(IPC.getCandles, (_caller, key: InstrumentKey, interval: Interval) =>
@@ -125,25 +117,27 @@ export function createIpc(
     host.send(EVENTS.transactionsChanged, all)
     return transaction
   })
+  handle(
+    IPC.updateTransaction,
+    async (_caller, id: string, input: NewTransaction) => {
+      const { transaction, all } = await portfolio.update(id, input)
+      host.send(EVENTS.transactionsChanged, all)
+      return transaction
+    }
+  )
   handle(IPC.removeTransaction, async (_caller, id: string) => {
     host.send(EVENTS.transactionsChanged, await portfolio.remove(id))
   })
 
-  handle(IPC.getAiAuth, async () => ({
-    savedKey: (await apiKeys.get()) !== null,
-    envKey: Boolean(process.env.ANTHROPIC_API_KEY),
-  }))
-  handle(IPC.setAiApiKey, async (_caller, key: string | null) => {
-    await apiKeys.set(key)
-    // A different key can be a different account with different models.
-    models.forget()
-  })
   handle(IPC.listAiModels, () => models.list())
   handle(IPC.listThreads, () => analyst.list())
   handle(IPC.askAi, (_caller, threadId: string | null, prompt: string) =>
     analyst.ask(threadId, prompt)
   )
   handle(IPC.cancelAi, (_caller, threadId: string) => analyst.cancel(threadId))
+  handle(IPC.renameThread, (_caller, threadId: string, title: string) =>
+    analyst.rename(threadId, title)
+  )
   handle(IPC.removeThread, (_caller, threadId: string) =>
     analyst.remove(threadId)
   )

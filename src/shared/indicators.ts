@@ -204,6 +204,77 @@ export function performanceStats(candles: Candle[]): PerformanceStats | null {
   }
 }
 
+/** Pearson correlation; null with under three points or a flat series. */
+export function correlation(a: number[], b: number[]): number | null {
+  const n = Math.min(a.length, b.length)
+  if (n < 3) return null
+  let meanA = 0
+  let meanB = 0
+  for (let i = 0; i < n; i++) {
+    meanA += a[i]!
+    meanB += b[i]!
+  }
+  meanA /= n
+  meanB /= n
+  let cov = 0
+  let varA = 0
+  let varB = 0
+  for (let i = 0; i < n; i++) {
+    const da = a[i]! - meanA
+    const db = b[i]! - meanB
+    cov += da * db
+    varA += da * da
+    varB += db * db
+  }
+  if (varA === 0 || varB === 0) return null
+  return cov / Math.sqrt(varA * varB)
+}
+
+/**
+ * The correlation of bar-to-bar returns between every pair of series, over
+ * the bars they all share.
+ *
+ * Bars are matched by bucket, not by timestamp: each provider stamps a daily
+ * bar differently (Binance at 00:00 UTC, Yahoo at the New York open, VNDirect
+ * near Hanoi midnight), so the same session never has the same `time` twice.
+ * `offset` moves a series' stamps into its own market's day before bucketing.
+ * Only shared bars count, which drops crypto's weekends against stocks — the
+ * Monday return then spans the weekend on both sides, as it should.
+ */
+export function returnCorrelations(
+  series: { candles: Candle[]; offset: number }[],
+  bucket: number,
+  /** The most recent shared bars to use. Counted after matching, since a
+   * crypto series has seven bars to a stock's five in the same week. */
+  limit = Infinity
+): { bars: number; matrix: (number | null)[][] } {
+  const closes = series.map(({ candles, offset }) => {
+    const byBucket = new Map<number, number>()
+    for (const bar of candles) {
+      byBucket.set(Math.floor((bar.time + offset) / bucket), bar.close)
+    }
+    return byBucket
+  })
+  const shared = [...(closes[0]?.keys() ?? [])]
+    .filter((id) => closes.every((each) => each.has(id)))
+    .sort((a, b) => a - b)
+    .slice(-limit)
+  const returns = closes.map((each) => {
+    const out: number[] = []
+    for (let i = 1; i < shared.length; i++) {
+      const from = each.get(shared[i - 1]!)!
+      out.push(from > 0 ? each.get(shared[i]!)! / from - 1 : 0)
+    }
+    return out
+  })
+  return {
+    bars: shared.length,
+    matrix: returns.map((a, i) =>
+      returns.map((b, j) => (i === j ? 1 : correlation(a, b)))
+    ),
+  }
+}
+
 export type Tone = "bullish" | "bearish" | "neutral"
 
 export type Signal = { label: string; tone: Tone }
